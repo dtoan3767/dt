@@ -1,7 +1,7 @@
 // ==UserScript==
-// @name         VMOS Cloud Auto Bot v3.5
+// @name         dt
 // @namespace    http://tampermonkey.net/
-// @version      3.5
+// @version      premium
 // @description  Đăng ký + Đổi MK + Lưu nhiều tài khoản + Xuất file
 // @match        https://*.vmoscloud.com/*
 // @grant        GM_xmlhttpRequest
@@ -297,7 +297,7 @@
     panelEl.id = 'vmos-menu-panel';
     panelEl.innerHTML = `
         <div class="panel-header">
-            <h3>☁️ VMOS Cloud v3.5</h3>
+            <h3>☁️ dt</h3>
         </div>
         <div class="panel-body">
             <div style="font-size: 12px; margin-bottom: 4px; color:#8b949e;">Tiến trình:</div>
@@ -680,13 +680,15 @@
                     <span class="card-time">${escapeHtml(acc.createdAt ? new Date(acc.createdAt).toLocaleString('vi-VN') : '')}</span>
                     <button class="vmos-del-btn" data-del="${escapeHtml(acc.email)}">🗑</button>
                 </div>
+                <div class="vmos-field"><label>Tài khoản|Mật khẩu</label><div class="row">
+                    <input class="vmos-acc-combo" readonly value="${escapeHtml(acc.email + '|' + acc.password)}">
+                    <button class="vmos-copy" data-copy-el="combo">Copy</button>
+                </div></div>
                 <div class="vmos-field"><label>Email</label><div class="row">
                     <input class="vmos-acc-email" value="${escapeHtml(acc.email)}">
-                    <button class="vmos-copy" data-copy-el="email">Copy</button>
                 </div></div>
                 <div class="vmos-field"><label>Mật khẩu</label><div class="row">
                     <input class="vmos-acc-pwd" value="${escapeHtml(acc.password)}">
-                    <button class="vmos-copy" data-copy-el="pwd">Copy</button>
                 </div></div>
                 <div class="vmos-field"><label>${tokenLabel}</label><div class="row">
                     <textarea class="vmos-acc-token" placeholder="Chưa có token">${escapeHtml(realToken)}</textarea>
@@ -700,8 +702,7 @@
                 const card = e.target.closest('.vmos-acc-card');
                 const kind = btn.getAttribute('data-copy-el');
                 let val = '';
-                if (kind === 'email') val = card.querySelector('.vmos-acc-email').value;
-                if (kind === 'pwd') val = card.querySelector('.vmos-acc-pwd').value;
+                if (kind === 'combo') val = card.querySelector('.vmos-acc-email').value + '|' + card.querySelector('.vmos-acc-pwd').value;
                 if (kind === 'token') val = card.querySelector('.vmos-acc-token').value;
                 navigator.clipboard.writeText(val).then(() => {
                     const old = btn.innerText;
@@ -728,6 +729,7 @@
                     const idx = list2.findIndex(a => a.email === email);
                     if (idx >= 0) {
                         list2[idx].password = card.querySelector('.vmos-acc-pwd').value;
+                        card.querySelector('.vmos-acc-combo').value = list2[idx].email + '|' + list2[idx].password;
                         const newToken = card.querySelector('.vmos-acc-token').value.trim();
                         if (isRealToken(newToken) || !newToken) list2[idx].token = newToken;
                         list2[idx].updatedAt = new Date().toISOString();
@@ -814,7 +816,7 @@
         clickLock = false;
         startBtn.innerText = "⏹️ ĐANG CHẠY...";
         startBtn.classList.add('running');
-        logStatus("Bot v3.5 đang đăng ký...");
+        logStatus("Bot dt đang đăng ký...");
         startAutomation().finally(() => {
             isRunning = false;
             startBtn.innerText = "🚀 ĐĂNG KÝ";
