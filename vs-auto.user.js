@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VSPhone Auto Reg & Tools
 // @namespace    http://tampermonkey.net/
-// @version      1.2
-// @description  Tự động đăng ký, bấm Đăng nhập/Đăng ký, bấm Nhận mã xác minh và điền OTP cho VSPhone Cloud
+// @version      1.3
+// @description  Tự động đăng ký, tự bấm lại nút Nhận mã xác minh nếu còn hiển thị và điền OTP cho VSPhone Cloud
 // @match        https://cloud.vsphone.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -602,20 +602,21 @@
         // Lấy danh sách ID thư cũ để lọc lấy OTP mới nhất
         const excludeIds = await getCurrentMessageIds(account.email, account.password);
 
-        // 5. Tìm và bấm nút "Nhận mã xác minh"
-        logStatus("Đang tìm nút 'Nhận mã xác minh'...");
+        // 5. Vòng lặp tìm và bấm nút "Nhận mã xác minh" (Nếu chữ nhận mã vẫn còn thì sẽ tự click lại liên tục đến khi chuyển trạng thái)
+        logStatus("Đang tìm và bấm nút 'Nhận mã xác minh'...");
         let getCodeBtn = null;
-        for (let i = 0; i < 10; i++) {
+        for (let attempt = 0; attempt < 10; attempt++) {
             getCodeBtn = findButtonByText(['nhận mã xác minh', 'nhận mã', 'send code', 'gửi mã']);
-            if (getCodeBtn) break;
-            await sleep(800);
+            if (getCodeBtn && isElementVisible(getCodeBtn)) {
+                logStatus(`👉 Đang bấm nút 'Nhận mã xác minh' (lần ${attempt + 1})...`);
+                await hardClick(getCodeBtn, { lockMs: 2000 });
+                await sleep(2500); // Đợi xem nút có đổi trạng thái hoặc gửi thành công chưa
+            } else {
+                // Nếu nút không còn xuất hiện hoặc đã biến mất/chuyển đếm ngược thì thoát vòng lặp
+                break;
+            }
         }
-        if (!getCodeBtn) {
-            logStatus("❌ Không tìm thấy nút 'Nhận mã xác minh'!");
-            return;
-        }
-        await hardClick(getCodeBtn, { lockMs: 2000 });
-        logStatus("✅ Đã bấm 'Nhận mã xác minh'! Đang chờ OTP từ mail.tm...");
+        logStatus("✅ Đã kích hoạt gửi mã thành công! Đang chờ OTP từ mail.tm...");
 
         // 6. Chờ nhận mã OTP từ mail.tm
         const otpResult = await getOtp(account.email, account.password, { excludeIds });
