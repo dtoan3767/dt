@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VSPhone Auto Reg & Tools
 // @namespace    http://tampermonkey.net/
-// @version      1.1
-// @description  Tự động điền email, bấm nhận mã, điền OTP, điền mật khẩu và đăng ký VSPhone Cloud
+// @version      1.2
+// @description  Tự động đăng ký, bấm Đăng nhập/Đăng ký, bấm Nhận mã xác minh và điền OTP cho VSPhone Cloud
 // @match        https://cloud.vsphone.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -398,7 +398,6 @@
     function findEmailInput() {
         let inp = findInputByPlaceholderOrText(['vui lòng nhập email', 'email', 'tài khoản']);
         if (inp) return inp;
-        // Fallback: Ô input đầu tiên không phải password
         for (const i of document.querySelectorAll('input')) {
             if (!isElementVisible(i)) continue;
             if (i.type !== 'password' && i.type !== 'checkbox' && i.type !== 'hidden') return i;
@@ -577,20 +576,48 @@
         logStatus(`✅ Đã điền email: ${account.email}`);
         await sleep(1000);
 
-        // 3. Tự động bấm nút "Nhận mã xác minh" nằm cạnh ô mã xác minh
-        logStatus("Đang tìm nút 'Nhận mã xác minh'...");
-        let getCodeBtn = findButtonByText(['nhận mã xác minh', 'nhận mã', 'send code', 'gửi mã']);
-        if (!getCodeBtn) {
-            logStatus("⚠️ Không tìm thấy nút 'Nhận mã xác minh'. Bạn hãy bấm thủ công nhé!");
-        } else {
-            await hardClick(getCodeBtn, { lockMs: 2000 });
-            logStatus("✅ Đã tự động bấm 'Nhận mã xác minh'!");
+        // 3. Tự động tick chọn điều khoản (nếu có)
+        let checkbox = document.querySelector('input[type="checkbox"]');
+        if (checkbox && !checkbox.checked) {
+            checkbox.click();
+            if (!checkbox.checked) {
+                checkbox.checked = true;
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            logStatus("✅ Đã tự động đồng ý điều khoản.");
         }
+        await sleep(500);
+
+        // 4. Bấm nút "Đăng nhập/Đăng ký" ở bước đầu tiên
+        logStatus("Đang tìm và bấm nút 'Đăng nhập/Đăng ký'...");
+        let loginRegisterBtn = findButtonByText(['đăng nhập/đăng ký', 'đăng nhập', 'đăng ký']);
+        if (!loginRegisterBtn) {
+            logStatus("❌ Không tìm thấy nút 'Đăng nhập/Đăng ký'!");
+            return;
+        }
+        await hardClick(loginRegisterBtn, { lockMs: 2500 });
+        logStatus("✅ Đã bấm 'Đăng nhập/Đăng ký'. Đang chờ load giao diện nhận mã...");
+        await sleep(2000);
 
         // Lấy danh sách ID thư cũ để lọc lấy OTP mới nhất
         const excludeIds = await getCurrentMessageIds(account.email, account.password);
 
-        // 4. Chờ nhận mã OTP từ mail.tm
+        // 5. Tìm và bấm nút "Nhận mã xác minh"
+        logStatus("Đang tìm nút 'Nhận mã xác minh'...");
+        let getCodeBtn = null;
+        for (let i = 0; i < 10; i++) {
+            getCodeBtn = findButtonByText(['nhận mã xác minh', 'nhận mã', 'send code', 'gửi mã']);
+            if (getCodeBtn) break;
+            await sleep(800);
+        }
+        if (!getCodeBtn) {
+            logStatus("❌ Không tìm thấy nút 'Nhận mã xác minh'!");
+            return;
+        }
+        await hardClick(getCodeBtn, { lockMs: 2000 });
+        logStatus("✅ Đã bấm 'Nhận mã xác minh'! Đang chờ OTP từ mail.tm...");
+
+        // 6. Chờ nhận mã OTP từ mail.tm
         const otpResult = await getOtp(account.email, account.password, { excludeIds });
         if (!otpResult) {
             logStatus("❌ Không nhận được mã OTP (timeout)! Kiểm tra lại.");
@@ -600,8 +627,16 @@
         logStatus(`✅ Nhận được mã OTP: ${otp}\nĐang điền vào ô mã xác minh...`);
         await sleep(1000);
 
-        // Điền OTP vào ô "Vui lòng nhập mã xác minh"
-        let otpInput = findOtpInput();
+        // 7. Điền OTP vào ô xác minh
+        let otpInput = await (async () => {
+            for(let i=0; i<10; i++){
+                let inp = findOtpInput();
+                if(inp) return inp;
+                await sleep(500);
+            }
+            return null;
+        })();
+
         if (otpInput) {
             otpInput.focus();
             setInputValue(otpInput, otp);
@@ -611,7 +646,7 @@
         }
         await sleep(800);
 
-        // 5. Điền mật khẩu vào ô "Vui lòng nhập mật khẩu đăng nhập của bạn"
+        // 8. Điền mật khẩu vào ô "Vui lòng nhập mật khẩu đăng nhập của bạn"
         logStatus("Đang điền mật khẩu...");
         let pwdInput = findPasswordInput();
         if (pwdInput) {
@@ -623,31 +658,20 @@
         }
         await sleep(800);
 
-        // 6. Tự động tick chọn điều khoản (nếu chưa tick)
-        let checkbox = document.querySelector('input[type="checkbox"]');
-        if (checkbox && !checkbox.checked) {
-            checkbox.click();
-            if (!checkbox.checked) {
-                checkbox.checked = true;
-                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
-            }
-            logStatus("✅ Đã tự động đồng ý điều khoản sử dụng.");
-        }
-
-        // 7. Tự động bấm nút "Đăng ký và đăng nhập"
+        // 9. Tự động bấm nút "Đăng ký và đăng nhập" cuối cùng
         logStatus("Đang tìm nút 'Đăng ký và đăng nhập'...");
-        let submitBtn = findButtonByText(['đăng ký và đăng nhập', 'đăng ký', 'register', 'sign up']);
+        let submitBtn = findButtonByText(['đăng ký và đăng nhập', 'đăng ký', 'register']);
         if (submitBtn) {
             await hardClick(submitBtn, { lockMs: 3000 });
             logStatus("✅ Đã bấm 'Đăng ký và đăng nhập'!");
         } else {
-            logStatus("⚠️ Không tìm thấy nút đăng ký. Bé có thể bấm thủ công.");
+            logStatus("⚠️ Không tìm thấy nút hoàn tất. Bé có thể bấm thủ công.");
         }
 
         // Lưu tài khoản cơ bản ngay vào bộ nhớ
         upsertAccount({ email: account.email, password: account.password });
 
-        // 8. Chờ lấy Token phiên làm việc
+        // 10. Chờ lấy Token phiên làm việc
         logStatus("⏳ Đợi 10s để hệ thống phản hồi và lưu token...");
         await sleep(10000);
 
