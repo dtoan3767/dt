@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VSPhone Auto Reg & Tools
 // @namespace    http://tampermonkey.net/
-// @version      1.0
-// @description  Tự động đăng ký, lấy OTP mail.tm, quản lý tài khoản & token cho VSPhone Cloud
+// @version      1.1
+// @description  Tự động điền email, bấm nhận mã, điền OTP, điền mật khẩu và đăng ký VSPhone Cloud
 // @match        https://cloud.vsphone.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -15,7 +15,6 @@
 (function() {
     'use strict';
 
-    // Thay đổi link Webhook Discord của bạn ở đây nếu muốn nhận thông báo
     const DISCORD_WEBHOOK_URL = "DÁN_WEBHOOK_URL_CỦA_BÉ_VÀO_ĐÂY";
 
     let isRunning = false;
@@ -63,11 +62,6 @@
     
     function clearAllAccounts() { 
         saveAll([]); 
-    }
-    
-    function getLatestAccount() {
-        const list = loadAll();
-        return list.length > 0 ? list[list.length - 1] : null;
     }
 
     // ================================================================
@@ -138,7 +132,6 @@
         const t = String(token).trim();
         if (t.length < 15) return false;
         if (t.startsWith('[{') || t.startsWith('{"')) return false;
-        if (t.includes('"username"') || t.includes('"email"')) return false;
         return true;
     }
 
@@ -386,29 +379,39 @@
     }
 
     // ================================================================
-    // TÌM KIẾM PHẦN TỬ TRÊN TRANG (DOM)
+    // TÌM KIẾM PHẦN TỬ CHÍNH XÁC THEO GIAO DIỆN VSPHONE
     // ================================================================
-    function findEmailInput() {
-        let best = null, bestScore = -1;
+    function findInputByPlaceholderOrText(keywords) {
+        const list = (Array.isArray(keywords) ? keywords : [keywords]).map(k => cleanText(k));
         for (const inp of document.querySelectorAll('input')) {
             if (!isElementVisible(inp)) continue;
-            const type = (inp.type || '').toLowerCase();
-            if (type === 'password' || type === 'checkbox' || type === 'hidden') continue;
-            
-            let score = 0;
-            const ph = (inp.placeholder || '').toLowerCase();
-            const name = (inp.name || '').toLowerCase();
-            const id = (inp.id || '').toLowerCase();
-            
-            if (ph.includes('email') || name.includes('email') || id.includes('email')) score += 500;
-            if (ph.includes('nhập') || ph.includes('tài khoản')) score += 100;
-            
-            if (score > bestScore) {
-                bestScore = score;
-                best = inp;
+            const ph = cleanText(inp.placeholder);
+            const name = cleanText(inp.name);
+            const id = cleanText(inp.id);
+            for (const k of list) {
+                if (ph.includes(k) || name.includes(k) || id.includes(k)) return inp;
             }
         }
-        return best;
+        return null;
+    }
+
+    function findEmailInput() {
+        let inp = findInputByPlaceholderOrText(['vui lòng nhập email', 'email', 'tài khoản']);
+        if (inp) return inp;
+        // Fallback: Ô input đầu tiên không phải password
+        for (const i of document.querySelectorAll('input')) {
+            if (!isElementVisible(i)) continue;
+            if (i.type !== 'password' && i.type !== 'checkbox' && i.type !== 'hidden') return i;
+        }
+        return null;
+    }
+
+    function findOtpInput() {
+        return findInputByPlaceholderOrText(['vui lòng nhập mã xác minh', 'mã xác minh', 'otp', 'code']);
+    }
+
+    function findPasswordInput() {
+        return findInputByPlaceholderOrText(['vui lòng nhập mật khẩu', 'mật khẩu', 'password']);
     }
 
     function findButtonByText(keywords) {
@@ -423,31 +426,6 @@
             }
         }
         return null;
-    }
-
-    async function fillOtpField(otp) {
-        // Tìm ô nhập OTP (thường là ô input đơn lẻ hoặc các ô chia nhỏ)
-        for (const inp of document.querySelectorAll('input')) {
-            if (!isElementVisible(inp)) continue;
-            const ph = (inp.placeholder || '').toLowerCase();
-            const name = (inp.name || '').toLowerCase();
-            if (ph.includes('code') || ph.includes('otp') || ph.includes('mã') || name.includes('code') || name.includes('otp')) {
-                inp.focus();
-                setInputValue(inp, otp);
-                return true;
-            }
-        }
-        // Trường hợp ô input thông thường còn lại
-        for (const inp of document.querySelectorAll('input')) {
-            if (inp === emailInputRef || !isElementVisible(inp) || inp.type === 'checkbox') continue;
-            const type = (inp.type || '').toLowerCase();
-            if (type === 'text' || type === 'tel' || type === 'number') {
-                inp.focus();
-                setInputValue(inp, otp);
-                return true;
-            }
-        }
-        return false;
     }
 
     // ================================================================
@@ -569,7 +547,7 @@
         clickLock = false;
         startBtn.innerText = "⏹️ ĐANG CHẠY...";
         startBtn.classList.add('running');
-        logStatus("Bắt đầu quy trình tự động đăng ký VSPhone...");
+        logStatus("Bắt đầu quy trình đăng ký VSPhone...");
         
         startAutomation().finally(() => {
             isRunning = false;
@@ -583,8 +561,8 @@
         let account = await createMailTm();
         if (!account) { logStatus("❌ Lỗi tạo email tạm thời."); return; }
 
-        // 2. Tìm ô nhập email trên trang web VSPhone
-        logStatus("Đang tìm ô nhập email trên trang...");
+        // 2. Điền email vào ô trên cùng
+        logStatus("Đang tìm ô nhập email...");
         let emailInput = null;
         for (let i = 0; i < 15; i++) {
             emailInput = findEmailInput();
@@ -594,43 +572,82 @@
         if (!emailInput) { logStatus("❌ Không tìm thấy ô nhập email!"); return; }
         emailInputRef = emailInput;
 
-        // Điền email
         emailInput.focus();
         setInputValue(emailInput, account.email);
         logStatus(`✅ Đã điền email: ${account.email}`);
         await sleep(1000);
 
-        // Lấy danh sách ID tin nhắn cũ để lọc OTP mới đến
-        const excludeIds = await getCurrentMessageIds(account.email, account.password);
-
-        // 3. Tìm nút gửi mã / đăng ký
-        logStatus("Đang tìm nút Gửi mã / Đăng ký...");
-        let sendBtn = findButtonByText(['gửi', 'send', 'get code', 'nhận mã', 'đăng ký', 'register']);
-        if (!sendBtn) {
-            logStatus("⚠️ Không tìm thấy nút gửi mã tự động. Bé hãy bấm thủ công nút Gửi mã trên web nhé!");
+        // 3. Tự động bấm nút "Nhận mã xác minh" nằm cạnh ô mã xác minh
+        logStatus("Đang tìm nút 'Nhận mã xác minh'...");
+        let getCodeBtn = findButtonByText(['nhận mã xác minh', 'nhận mã', 'send code', 'gửi mã']);
+        if (!getCodeBtn) {
+            logStatus("⚠️ Không tìm thấy nút 'Nhận mã xác minh'. Bạn hãy bấm thủ công nhé!");
         } else {
-            await hardClick(sendBtn, { lockMs: 3000 });
-            logStatus("✅ Đã tự động bấm gửi mã!");
+            await hardClick(getCodeBtn, { lockMs: 2000 });
+            logStatus("✅ Đã tự động bấm 'Nhận mã xác minh'!");
         }
 
-        // 4. Chờ nhận OTP từ mail.tm
+        // Lấy danh sách ID thư cũ để lọc lấy OTP mới nhất
+        const excludeIds = await getCurrentMessageIds(account.email, account.password);
+
+        // 4. Chờ nhận mã OTP từ mail.tm
         const otpResult = await getOtp(account.email, account.password, { excludeIds });
         if (!otpResult) {
             logStatus("❌ Không nhận được mã OTP (timeout)! Kiểm tra lại.");
             return;
         }
         const otp = otpResult.otp;
-        logStatus(`✅ Nhận được mã OTP: ${otp}\nĐang điền vào form...`);
+        logStatus(`✅ Nhận được mã OTP: ${otp}\nĐang điền vào ô mã xác minh...`);
         await sleep(1000);
 
-        // Điền OTP
-        await fillOtpField(otp);
-        logStatus("✅ Đã điền OTP xong. Bé bấm Xác nhận/Đăng nhập tiếp theo trên web nếu cần.");
+        // Điền OTP vào ô "Vui lòng nhập mã xác minh"
+        let otpInput = findOtpInput();
+        if (otpInput) {
+            otpInput.focus();
+            setInputValue(otpInput, otp);
+            logStatus("✅ Đã điền OTP thành công!");
+        } else {
+            logStatus(`⚠️ Không tìm thấy ô OTP. Mã của bạn là: ${otp}`);
+        }
+        await sleep(800);
 
-        // Lưu tài khoản cơ bản
+        // 5. Điền mật khẩu vào ô "Vui lòng nhập mật khẩu đăng nhập của bạn"
+        logStatus("Đang điền mật khẩu...");
+        let pwdInput = findPasswordInput();
+        if (pwdInput) {
+            pwdInput.focus();
+            setInputValue(pwdInput, account.password);
+            logStatus(`✅ Đã điền mật khẩu: ${account.password}`);
+        } else {
+            logStatus("⚠️ Không tìm thấy ô nhập mật khẩu.");
+        }
+        await sleep(800);
+
+        // 6. Tự động tick chọn điều khoản (nếu chưa tick)
+        let checkbox = document.querySelector('input[type="checkbox"]');
+        if (checkbox && !checkbox.checked) {
+            checkbox.click();
+            if (!checkbox.checked) {
+                checkbox.checked = true;
+                checkbox.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            logStatus("✅ Đã tự động đồng ý điều khoản sử dụng.");
+        }
+
+        // 7. Tự động bấm nút "Đăng ký và đăng nhập"
+        logStatus("Đang tìm nút 'Đăng ký và đăng nhập'...");
+        let submitBtn = findButtonByText(['đăng ký và đăng nhập', 'đăng ký', 'register', 'sign up']);
+        if (submitBtn) {
+            await hardClick(submitBtn, { lockMs: 3000 });
+            logStatus("✅ Đã bấm 'Đăng ký và đăng nhập'!");
+        } else {
+            logStatus("⚠️ Không tìm thấy nút đăng ký. Bé có thể bấm thủ công.");
+        }
+
+        // Lưu tài khoản cơ bản ngay vào bộ nhớ
         upsertAccount({ email: account.email, password: account.password });
 
-        // 5. Chờ lấy Token phiên làm việc
+        // 8. Chờ lấy Token phiên làm việc
         logStatus("⏳ Đợi 10s để hệ thống phản hồi và lưu token...");
         await sleep(10000);
 
@@ -639,15 +656,15 @@
             upsertAccount({ email: account.email, token: tokenInfo.token, tokenSource: tokenInfo.source });
             logStatus(`✅ Đã lưu Token thành công từ (${tokenInfo.source})!`);
         } else {
-            logStatus("⚠️ Chưa tự bắt được token. Bạn có thể tự lấy trong Storage sau.");
+            logStatus("⚠️ Chưa tự bắt được token. Bạn có thể bấm REFRESH trong menu sau.");
         }
 
-        // Gửi qua Discord nếu có cấu hình
+        // Gửi thông báo qua Discord nếu có cấu hình
         sendToDiscord(account.email, account.password, tokenInfo ? tokenInfo.token : null);
 
         accSection.style.display = 'block';
         renderList();
-        logStatus(`🎉 Hoàn tất quy trình cho email: ${account.email}`);
+        logStatus(`🎉 Hoàn tất quy trình đăng ký cho tài khoản: ${account.email}`);
     }
 
     viewAllBtn.addEventListener('click', () => {
