@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         VSPhone Auto Reg & Tools
 // @namespace    http://tampermonkey.net/
-// @version      1.3
-// @description  Tự động đăng ký, tự bấm lại nút Nhận mã xác minh nếu còn hiển thị và điền OTP cho VSPhone Cloud
+// @version      1.4
+// @description  Tự động xử lý popup lỗi xác minh, bấm nhận mã và đăng ký cho VSPhone Cloud
 // @match        https://cloud.vsphone.com/*
 // @grant        GM_xmlhttpRequest
 // @grant        GM_setValue
@@ -417,7 +417,7 @@
         const list = (Array.isArray(keywords) ? keywords : [keywords]).map(k => cleanText(k));
         const all = document.querySelectorAll('button, [role="button"], a, span, div');
         for (const el of all) {
-            if (!isElementVisible(el) || el.clientHeight > 120 || el.clientWidth > 400) continue;
+            if (!isElementVisible(el) || el.clientHeight > 150 || el.clientWidth > 500) continue;
             if (!isClickable(el)) continue;
             const t = cleanText(el.textContent);
             for (const k of list) {
@@ -425,6 +425,29 @@
             }
         }
         return null;
+    }
+
+    // Tự động quét và tắt popup lỗi "Không tải được thành phần mã xác minh"
+    async function handleCaptchaPopup() {
+        for (let i = 0; i < 5; i++) {
+            const allEls = document.querySelectorAll('div, span, p, button');
+            for (const el of allEls) {
+                if (!isElementVisible(el)) continue;
+                const txt = cleanText(el.textContent);
+                if (txt.includes('không tải được') || txt.includes('thành phần mã xác minh')) {
+                    logStatus('⚠️ Phát hiện popup lỗi tải mã xác minh, đang bấm OK...');
+                    // Tìm nút OK hoặc nút đóng gần đó
+                    let okBtn = findButtonByText(['ok', 'xác nhận', 'đóng', 'x']);
+                    if (okBtn) {
+                        await hardClick(okBtn);
+                        await sleep(1000);
+                        return true;
+                    }
+                }
+            }
+            await sleep(500);
+        }
+        return false;
     }
 
     // ================================================================
@@ -586,7 +609,7 @@
             }
             logStatus("✅ Đã tự động đồng ý điều khoản.");
         }
-        await sleep(500);
+        await sleep(800);
 
         // 4. Bấm nút "Đăng nhập/Đăng ký" ở bước đầu tiên
         logStatus("Đang tìm và bấm nút 'Đăng nhập/Đăng ký'...");
@@ -597,22 +620,24 @@
         }
         await hardClick(loginRegisterBtn, { lockMs: 2500 });
         logStatus("✅ Đã bấm 'Đăng nhập/Đăng ký'. Đang chờ load giao diện nhận mã...");
-        await sleep(2000);
+        await sleep(2500); // Tăng thời gian chờ load form phụ
 
         // Lấy danh sách ID thư cũ để lọc lấy OTP mới nhất
         const excludeIds = await getCurrentMessageIds(account.email, account.password);
 
-        // 5. Vòng lặp tìm và bấm nút "Nhận mã xác minh" (Nếu chữ nhận mã vẫn còn thì sẽ tự click lại liên tục đến khi chuyển trạng thái)
+        // 5. Vòng lặp tìm và bấm nút "Nhận mã xác minh" có kiểm tra popup lỗi
         logStatus("Đang tìm và bấm nút 'Nhận mã xác minh'...");
         let getCodeBtn = null;
-        for (let attempt = 0; attempt < 10; attempt++) {
+        for (let attempt = 0; attempt < 8; attempt++) {
+            // Kiểm tra và xử lý popup lỗi nếu xuất hiện
+            await handleCaptchaPopup();
+
             getCodeBtn = findButtonByText(['nhận mã xác minh', 'nhận mã', 'send code', 'gửi mã']);
             if (getCodeBtn && isElementVisible(getCodeBtn)) {
                 logStatus(`👉 Đang bấm nút 'Nhận mã xác minh' (lần ${attempt + 1})...`);
                 await hardClick(getCodeBtn, { lockMs: 2000 });
-                await sleep(2500); // Đợi xem nút có đổi trạng thái hoặc gửi thành công chưa
+                await sleep(3000); // Đợi xem có popup lỗi hay không
             } else {
-                // Nếu nút không còn xuất hiện hoặc đã biến mất/chuyển đếm ngược thì thoát vòng lặp
                 break;
             }
         }
