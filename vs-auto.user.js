@@ -223,7 +223,7 @@
     panelEl.id = 'vs-menu-panel';
     panelEl.innerHTML = `
         <div class="panel-header">
-            <h3>📱 VSPhone Auto</h3>
+            <h3>dt💤</h3>
         </div>
         <div class="panel-body">
             <div style="font-size: 12px; margin-bottom: 4px; color:#8b949e;">Trạng thái:</div>
@@ -314,7 +314,7 @@
             let domainsRes = await httpGet("https://api.mail.tm/domains");
             let domain = domainsRes["hydra:member"][0]["domain"];
             let email = `${Math.random().toString(36).substring(2, 12)}@${domain}`;
-            let password = "vsphone2026!";
+            let password = "duytoan20009!";
             logStatus(`Tạo email thành công: ${email}`);
             await httpPost("https://api.mail.tm/accounts", { address: email, password: password }, { "Content-Type": "application/json" });
             return { email, password };
